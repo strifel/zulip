@@ -57,9 +57,11 @@ from zxcvbn import zxcvbn
 
 from zerver.decorator import client_is_exempt_from_rate_limiting
 from zerver.lib.actions import (
+    do_change_user_delivery_email,
     do_create_user,
     do_deactivate_user,
     do_reactivate_user,
+    do_set_ldap_unique_identifier,
     do_update_user_custom_profile_data_if_changed,
 )
 from zerver.lib.avatar import avatar_url, is_avatar_new
@@ -659,6 +661,18 @@ class ZulipLDAPAuthBackendBase(ZulipAuthMixin, LDAPBackend):
                 raise ZulipLDAPException(e.msg)
             do_change_full_name(user_profile, full_name, None)
 
+    def sync_mail_from_ldap(
+        self, current_mail: str, ldap_user: _LDAPUser, realm: Realm
+    ) -> Optional[UserProfile]:
+        if (
+            hasattr(ldap_user, "dn")
+            and UserProfile.objects.filter(ext_auth_uid__ldap=ldap_user.dn, realm=realm).exists()
+        ):
+            user_profile = UserProfile.objects.get(ext_auth_uid__ldap=ldap_user.dn, realm=realm)
+            do_change_user_delivery_email(user_profile, current_mail)
+            return user_profile
+        return None
+
     def sync_custom_profile_fields_from_ldap(
         self, user_profile: UserProfile, ldap_user: _LDAPUser
     ) -> None:
@@ -767,6 +781,10 @@ class ZulipLDAPAuthBackend(ZulipLDAPAuthBackendBase):
 
         username = self.user_email_from_ldapuser(username, ldap_user)
 
+        dn = None
+        if hasattr(ldap_user, "dn"):
+            dn = ldap_user.dn
+
         if "userAccountControl" in settings.AUTH_LDAP_USER_ATTR_MAP:  # nocoverage
             ldap_disabled = self.is_account_control_disabled_user(ldap_user)
             if ldap_disabled:
@@ -775,9 +793,18 @@ class ZulipLDAPAuthBackend(ZulipLDAPAuthBackendBase):
                 raise ZulipLDAPException("User has been deactivated")
 
         user_profile = common_get_active_user(username, self._realm, return_data)
+
         if user_profile is not None:
+            # Set LDAP identifier
+            do_set_ldap_unique_identifier(user_profile, dn)
             # An existing user, successfully authed; return it.
             return user_profile, False
+
+        changed_mail_profile = self.sync_mail_from_ldap(
+            current_mail=username, ldap_user=ldap_user, realm=self._realm
+        )
+        if changed_mail_profile is not None:
+            return changed_mail_profile, False
 
         if return_data.get("inactive_realm"):
             # This happens if there is a user account in a deactivated realm
@@ -826,8 +853,9 @@ class ZulipLDAPAuthBackend(ZulipLDAPAuthBackendBase):
             opts["default_stream_groups"] = []
 
         user_profile = do_create_user(
-            username, None, self._realm, full_name, acting_user=None, **opts
+            username, None, self._realm, full_name, acting_user=None, ldap_auth_id=dn, **opts
         )
+
         self.sync_avatar_from_ldap(user_profile, ldap_user)
         self.sync_custom_profile_fields_from_ldap(user_profile, ldap_user)
 
@@ -902,9 +930,11 @@ class ZulipLDAPUserPopulator(ZulipLDAPAuthBackendBase):
                 )
                 do_reactivate_user(user)
 
+        self.sync_mail_from_ldap(username, ldap_user, user.realm)
         self.sync_avatar_from_ldap(user, ldap_user)
         self.sync_full_name_from_ldap(user, ldap_user)
         self.sync_custom_profile_fields_from_ldap(user, ldap_user)
+        do_set_ldap_unique_identifier(user, ldap_user.dn)
         return (user, built)
 
 

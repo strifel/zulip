@@ -1241,6 +1241,11 @@ class UserProfile(AbstractBaseUser, PermissionsMixin):
 
     zoom_token: Optional[object] = models.JSONField(default=None, null=True)
 
+    # Contains a external uid of the user to make it able
+    # to sync mails form e.g. LDAP
+    # Contains JSON in the form of {"ldap": "TestUser"}
+    ext_auth_uid: Optional[object] = models.JSONField(default=dict, null=True)
+
     objects: UserManager = UserManager()
 
     # Define the types of the various automatically managed properties

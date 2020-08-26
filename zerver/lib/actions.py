@@ -637,6 +637,7 @@ def do_create_user(
     realm_creation: bool = False,
     *,
     acting_user: Optional[UserProfile],
+    ldap_auth_id: Optional[str] = None,
 ) -> UserProfile:
 
     user_profile = create_user(
@@ -654,6 +655,7 @@ def do_create_user(
         default_events_register_stream=default_events_register_stream,
         default_all_public_streams=default_all_public_streams,
         source_profile=source_profile,
+        ldap_auth_id=ldap_auth_id,
     )
 
     event_time = user_profile.date_joined
@@ -1259,6 +1261,15 @@ def send_user_email_update_event(user_profile: UserProfile) -> None:
         dict(type="realm_user", op="update", person=payload),
         active_user_ids(user_profile.realm_id),
     )
+
+
+def do_set_ldap_unique_identifier(
+    user_profile: UserProfile, ldap_identifier: Optional[str]
+) -> None:
+    if user_profile.ext_auth_uid is None:
+        user_profile.ext_auth_uid = {"ldap": ldap_identifier}
+    else:
+        user_profile.ext_auth_uid["ldap"] = ldap_identifier  # type: ignore[index] # MyPy does not recognize it is a map here
 
 
 def do_change_user_delivery_email(user_profile: UserProfile, new_email: str) -> None:

@@ -144,6 +144,7 @@ def create_user(
     default_events_register_stream: Optional[Stream] = None,
     default_all_public_streams: Optional[bool] = None,
     source_profile: Optional[UserProfile] = None,
+    ldap_auth_id: Optional[str] = None,
     force_id: Optional[int] = None,
 ) -> UserProfile:
     user_profile = create_user_profile(
@@ -165,6 +166,9 @@ def create_user(
     user_profile.default_events_register_stream = default_events_register_stream
     if role is not None:
         user_profile.role = role
+    # If a auth ID for a backend like LDAP is provided, save it.
+    if ldap_auth_id is not None:
+        user_profile.ext_auth_uid = {"ldap": ldap_auth_id}
     # Allow the ORM default to be used if not provided
     if default_all_public_streams is not None:
         user_profile.default_all_public_streams = default_all_public_streams
