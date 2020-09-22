@@ -242,6 +242,14 @@ AUTH_LDAP_USER_ATTR_MAP = {
     # "org_membership": "department",
 }
 
+## See: https://zulip.readthedocs.io/en/latest/production/authentication-methods.html#restricting-ldap-user-access-to-specific-organizations
+# AUTH_LDAP_ADVANCED_REALM_ACCESS_CONTROL = {
+#    "zulip": {
+#        "department": "main",
+#        "employeeType": "staff"
+#    }
+# }
+
 ## Whether to automatically deactivate users not found in LDAP. If LDAP
 ## is the only authentication method, then this setting defaults to
 ## True.  If other authentication methods are enabled, it defaults to

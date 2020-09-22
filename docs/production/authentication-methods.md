@@ -304,6 +304,19 @@ department: www
 ...
 ```
 
+If you need more specific access rules have a look at the `AUTH_LDAP_ADVANCED_REALM_ACCESS_CONTROL`
+setting which allows multiple attributes, different attributes for different organizations and
+custom required values.
+`org_membership` overrides this setting:
+1. If `org_membership` is set and allows access, access will be granted
+2. If `org_membership` is not set or does not allow access, `AUTH_LDAP_ADVANCED_REALM_ACCESS_CONTROL`
+will control access.
+
+This contains a map with the name of the Organizations (subdomain)
+The organization map contains a map with an attribute, and a required value.
+If one of these value is a value of the attribute of the user, access is granted
+If nothing matches access through LDAP is not granted (but maybe still by different backends).
+
 ```eval_rst
 .. warning::
     Restricting access using this mechanism will only affect authentication via LDAP,
