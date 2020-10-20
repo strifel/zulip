@@ -8672,6 +8672,13 @@ paths:
       description: |
         Create a video call URL for a Big Blue Button video call.
         Requires Big Blue Button to be configured on the Zulip server.
+      parameters:
+        - in: query
+          name: meeting_name
+          schema:
+            type: string
+          required: true
+          description: Title of the Big Blue Button Meeting
       responses:
         "200":
           description: Success.
@@ -8688,7 +8695,7 @@ paths:
                         description: |
                           The URL for the Big Blue Button video call.
                         type: string
-                        example: "/calls/bbb/join?meeting_id=%22zulip-something%22&password=%22something%22&checksum=%22somechecksum%22"
+                        example: "/calls/bbb/join?meeting_id=%22zulip-something%22&password=%22something%22&name=%22your_meeting_name%22&checksum=%22somechecksum%22"
                     example:
                       {
                         "msg": "",

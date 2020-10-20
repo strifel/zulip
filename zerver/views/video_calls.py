@@ -161,18 +161,29 @@ def deauthorize_zoom_user(request: HttpRequest) -> HttpResponse:
     return json_success()
 
 
-def get_bigbluebutton_url(request: HttpRequest, user_profile: UserProfile) -> HttpResponse:
+@has_request_variables
+def get_bigbluebutton_url(request: HttpRequest, user_profile: UserProfile,
+                          meeting_name: str = REQ()) -> HttpResponse:
     # https://docs.bigbluebutton.org/dev/api.html#create for reference on the API calls
     # https://docs.bigbluebutton.org/dev/api.html#usage for reference for checksum
     id = "zulip-" + str(random.randint(100000000000, 999999999999))
     password = b32encode(secrets.token_bytes(7))[:10].decode()
-    checksum = hashlib.sha1(("create" + "meetingID=" + id + "&moderatorPW="
-                             + password + "&attendeePW=" + password + "a" + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest()
-    url = add_query_to_redirect_url("/calls/bigbluebutton/join", urlencode({
-        "meeting_id": "\"" + id + "\"",
-        "password": "\"" + password + "\"",
-        "checksum": "\"" + checksum + "\""
-    }))
+    create_params = urlencode({  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
+        "meetingID": id,
+        "name": meeting_name,
+        "moderatorPW": password,
+        # We generate the password this way to make sure only the server knows it.
+        # This is a easy way to prevent the user to get the data of the shared url
+        # and use it later and skipping Zulip validation
+        "attendeePW": hashlib.sha1((password + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest(),
+    }, quote_via=quote)
+    checksum = hashlib.sha1(("create" + create_params + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest()
+    url = add_query_to_redirect_url("/calls/bigbluebutton/join", urlencode({  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
+        "meeting_id": id,
+        "name": meeting_name,
+        "password": password,
+        "checksum": checksum
+    }, quote_via=quote))
     return json_success({"url": url})
 
 
@@ -184,20 +195,23 @@ def get_bigbluebutton_url(request: HttpRequest, user_profile: UserProfile) -> Ht
 @zulip_login_required
 @never_cache
 @has_request_variables
-def join_bigbluebutton(request: HttpRequest, meeting_id: str = REQ(validator=check_string),
-                       password: str = REQ(validator=check_string),
-                       checksum: str = REQ(validator=check_string)) -> HttpResponse:
+def join_bigbluebutton(request: HttpRequest, meeting_id: str = REQ(),
+                       name: str = REQ(), password: str = REQ(),
+                       checksum: str = REQ()) -> HttpResponse:
     if settings.BIG_BLUE_BUTTON_URL is None or settings.BIG_BLUE_BUTTON_SECRET is None:
         return json_error(_("Big Blue Button is not configured."))
     else:
         try:
             response = requests.get(
-                add_query_to_redirect_url(settings.BIG_BLUE_BUTTON_URL + "api/create", urlencode({
-                    "meetingID": meeting_id,
-                    "moderatorPW": password,
-                    "attendeePW": password + "a",
-                    "checksum": checksum
-                })))
+                add_query_to_redirect_url(
+                    settings.BIG_BLUE_BUTTON_URL + "api/create",
+                    urlencode({  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
+                        "meetingID": meeting_id,
+                        "name": name,
+                        "moderatorPW": password,
+                        "attendeePW": hashlib.sha1((password + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest(),
+                        "checksum": checksum
+                    }, quote_via=quote)))
             response.raise_for_status()
         except requests.RequestException:
             return json_error(_("Error connecting to the Big Blue Button server."))

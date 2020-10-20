@@ -1248,8 +1248,26 @@ exports.initialize = function () {
             available_providers.big_blue_button &&
             page_params.realm_video_chat_provider === available_providers.big_blue_button.id
         ) {
+            let meeting_name = "";
+            if (compose_state.get_message_type() === "stream") {
+                meeting_name =
+                    compose_state.stream_name() + " > " + compose_state.topic() + " Meeting";
+            } else if (compose_state.get_message_type() === "private") {
+                if (compose_state.private_message_recipient().includes(people.my_current_email())) {
+                    meeting_name = compose_state.private_message_recipient() + " Meeting";
+                } else {
+                    meeting_name =
+                        compose_state.private_message_recipient() +
+                        " and " +
+                        people.my_current_email() +
+                        " Meeting";
+                }
+            }
             channel.get({
                 url: "/json/calls/bigbluebutton/create",
+                data: {
+                    meeting_name,
+                },
                 success(response) {
                     insert_video_call_url(response.url, target_textarea);
                 },
