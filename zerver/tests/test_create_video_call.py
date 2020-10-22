@@ -174,12 +174,12 @@ class TestVideoCall(ZulipTestCase):
     @responses.activate
     def test_join_bigbluebutton_redirect(self) -> None:
         responses.add(responses.GET, "https://bbb.example.com/bigbluebutton/api/create?meetingID=zulip-1&name=general%20%3E%20meeting&moderatorPW=a&attendeePW=76af7efae0d034d1e3335ed1b90f24b6cadf2bf1&checksum=check",
-                      "<response><returncode>SUCCESS</returncode><messageKey/></response>")
+                      "<response><returncode>SUCCESS</returncode><messageKey/><createTime>0</createTime></response>")
         response = self.client_get("/calls/bigbluebutton/join", {"meeting_id": 'zulip-1', "password": 'a', "checksum": 'check', "name": 'general%20%3E%20meeting'})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(isinstance(response, HttpResponseRedirect), True)
         self.assertEqual(response.url, "https://bbb.example.com/bigbluebutton/api/join?meetingID=zulip-1&password=a"
-                                       "&fullName=King%20Hamlet&checksum=7ddbb4e7e5aa57cb8c58db12003f3b5b040ff530")
+                                       "&fullName=King%20Hamlet&createTime=0&checksum=b0111ef1460887f05714998cfa11516bda4a3709")
 
     @responses.activate
     def test_join_bigbluebutton_redirect_wrong_check(self) -> None:

@@ -228,6 +228,7 @@ def join_bigbluebutton(request: HttpRequest, meeting_id: str = REQ(),
                 "meetingID": meeting_id,
                 "password": password,
                 "fullName": request.user.full_name,
+                "createTime": payload.find("createTime").text
             },
             quote_via=quote,
         )
