@@ -1,9 +1,12 @@
 from unittest import mock
+from urllib.parse import quote, urlencode
 
 import responses
+from django.core.signing import Signer
 from django.http import HttpResponseRedirect
 
 from zerver.lib.test_classes import ZulipTestCase
+from zerver.lib.url_encoding import add_query_to_redirect_url
 
 
 class TestVideoCall(ZulipTestCase):
@@ -11,6 +14,9 @@ class TestVideoCall(ZulipTestCase):
         super().setUp()
         self.user = self.example_user("hamlet")
         self.login_user(self.user)
+        # Signing for bbb
+        self.signer = Signer()
+        self.signed_a = self.signer.sign("a")
 
     def test_register_video_request_no_settings(self) -> None:
         with self.settings(VIDEO_ZOOM_CLIENT_ID=None):
@@ -163,55 +169,61 @@ class TestVideoCall(ZulipTestCase):
 
     def test_create_bigbluebutton_link(self) -> None:
         with mock.patch('zerver.views.video_calls.random.randint', return_value="1"), mock.patch(
-             'secrets.token_bytes', return_value=b"\x00" * 7):
+             'secrets.token_bytes', return_value=b"\x00" * 12):
             response = self.client_get("/json/calls/bigbluebutton/create?meeting_name=general%20>%20meeting")
             self.assert_json_success(response)
             self.assertEqual(response.json()['url'],
-                             "/calls/bigbluebutton/join?meeting_id=zulip-1"
-                             "&name=general%20%3E%20meeting&password=AAAAAAAAAA"
-                             "&checksum=2f9f2c72102277d74de96869dd2d27e3307d16f8")
+                             add_query_to_redirect_url("/calls/bigbluebutton/join", urlencode(  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
+                                 {
+                                     "meeting_id": self.signer.sign('zulip-1'),
+                                     "name": self.signer.sign("general > meeting"),
+                                     "password": self.signer.sign('AAAAAAAAAAAAAAAAAAAA')
+                                 }, quote_via=quote))
+                             )
 
     @responses.activate
     def test_join_bigbluebutton_redirect(self) -> None:
-        responses.add(responses.GET, "https://bbb.example.com/bigbluebutton/api/create?meetingID=zulip-1&name=general%20%3E%20meeting&moderatorPW=a&attendeePW=76af7efae0d034d1e3335ed1b90f24b6cadf2bf1&checksum=check",
+        responses.add(responses.GET, "https://bbb.example.com/bigbluebutton/api/create?meetingID=a&name=a"
+                                     "&moderatorPW=a&attendeePW=a&checksum=b1d267364c1fedf501ab67268f40e8ae1c053198",
                       "<response><returncode>SUCCESS</returncode><messageKey/><createTime>0</createTime></response>")
-        response = self.client_get("/calls/bigbluebutton/join", {"meeting_id": 'zulip-1', "password": 'a', "checksum": 'check', "name": 'general%20%3E%20meeting'})
+        response = self.client_get("/calls/bigbluebutton/join", {"meeting_id": self.signed_a, "password": self.signed_a, "name": self.signed_a})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(isinstance(response, HttpResponseRedirect), True)
-        self.assertEqual(response.url, "https://bbb.example.com/bigbluebutton/api/join?meetingID=zulip-1&password=a"
-                                       "&fullName=King%20Hamlet&createTime=0&checksum=b0111ef1460887f05714998cfa11516bda4a3709")
+        self.assertEqual(response.url, "https://bbb.example.com/bigbluebutton/api/join?meetingID=a&"
+                                       "password=a&fullName=King%20Hamlet&createTime=0&checksum=ebbf3b7c6b2be6c1d5747d716433fb4c487d286e")
 
     @responses.activate
-    def test_join_bigbluebutton_redirect_wrong_check(self) -> None:
+    def test_join_bigbluebutton_redirect_wrong_big_blue_button_checksum(self) -> None:
         responses.add(responses.GET,
-                      "https://bbb.example.com/bigbluebutton/api/create?meetingID=zulip-1&name=a&moderatorPW=a&attendeePW=76af7efae0d034d1e3335ed1b90f24b6cadf2bf1&checksum=check",
+                      "https://bbb.example.com/bigbluebutton/api/create?meetingID=a&name=a&moderatorPW=a&attendeePW=a&checksum=b1d267364c1fedf501ab67268f40e8ae1c053198",
                       "<response><returncode>FAILED</returncode><messageKey>checksumError</messageKey>"
                       "<message>You did not pass the checksum security check</message></response>")
-        response = self.client_get("/calls/bigbluebutton/join", {"meeting_id": 'zulip-1', "password": 'a', "checksum": 'check'})
+        response = self.client_get("/calls/bigbluebutton/join", {"meeting_id": self.signed_a, "password": self.signed_a, "name": self.signed_a})
         self.assert_json_error(response, "Error authenticating to the Big Blue Button server.")
 
     @responses.activate
     def test_join_bigbluebutton_redirect_server_error(self) -> None:
         # Simulate bbb server error
         responses.add(responses.GET,
-                      "https://bbb.example.com/bigbluebutton/api/create?meetingID=zulip-1&name=a&moderatorPW=a&attendeePW=76af7efae0d034d1e3335ed1b90f24b6cadf2bf1&checksum=check", "", status=500)
+                      "https://bbb.example.com/bigbluebutton/api/create?meetingID=a&name=a&moderatorPW=a&attendeePW=a&checksum=b1d267364c1fedf501ab67268f40e8ae1c053198", "", status=500)
         response = self.client_get(
-            "/calls/bigbluebutton/join", {"meeting_id": 'zulip-1', "password": 'a', "checksum": 'check'})
+            "/calls/bigbluebutton/join", {"meeting_id": self.signed_a, "password": self.signed_a, "name": self.signed_a})
+
         self.assert_json_error(response, "Error connecting to the Big Blue Button server.")
 
     @responses.activate
     def test_join_bigbluebutton_redirect_error_by_server(self) -> None:
         # Simulate bbb server error
         responses.add(responses.GET,
-                      "https://bbb.example.com/bigbluebutton/api/create?meetingID=zulip-1&name=a&moderatorPW=a&attendeePW=76af7efae0d034d1e3335ed1b90f24b6cadf2bf1&checksum=check",
+                      "https://bbb.example.com/bigbluebutton/api/create?meetingID=a&name=a&moderatorPW=a&attendeePW=a&checksum=b1d267364c1fedf501ab67268f40e8ae1c053198",
                       "<response><returncode>FAILURE</returncode><messageKey>otherFailure</messageKey></response>")
         response = self.client_get(
-            "/calls/bigbluebutton/join", {"meeting_id": 'zulip-1', "password": 'a', "checksum": 'check'})
+            "/calls/bigbluebutton/join", {"meeting_id": self.signed_a, "password": self.signed_a, "name": self.signed_a})
         self.assert_json_error(response, "Big Blue Button server returned an unexpected error.")
 
     def test_join_bigbluebutton_redirect_not_configured(self) -> None:
         with self.settings(BIG_BLUE_BUTTON_SECRET=None,
                            BIG_BLUE_BUTTON_URL=None):
             response = self.client_get(
-                "/calls/bigbluebutton/join", {"meeting_id": 'zulip-1', "password": 'a', "checksum": 'check', "name": 'a'})
+                "/calls/bigbluebutton/join", {"meeting_id":  self.signed_a, "password":  self.signed_a, "name":  self.signed_a})
             self.assert_json_error(response, "Big Blue Button is not configured.")

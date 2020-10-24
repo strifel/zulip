@@ -10,6 +10,7 @@ from urllib.parse import quote, urlencode, urljoin
 import requests
 from defusedxml import ElementTree
 from django.conf import settings
+from django.core.signing import Signer
 from django.http import HttpRequest, HttpResponse
 from django.middleware import csrf
 from django.shortcuts import redirect, render
@@ -167,22 +168,12 @@ def get_bigbluebutton_url(request: HttpRequest, user_profile: UserProfile,
     # https://docs.bigbluebutton.org/dev/api.html#create for reference on the API calls
     # https://docs.bigbluebutton.org/dev/api.html#usage for reference for checksum
     id = "zulip-" + str(random.randint(100000000000, 999999999999))
-    password = b32encode(secrets.token_bytes(7))[:10].decode()
-    create_params = urlencode({  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
-        "meetingID": id,
-        "name": meeting_name,
-        "moderatorPW": password,
-        # We generate the password this way to make sure only the server knows it.
-        # This is a easy way to prevent the user to get the data of the shared url
-        # and use it later and skipping Zulip validation
-        "attendeePW": hashlib.sha1((password + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest(),
-    }, quote_via=quote)
-    checksum = hashlib.sha1(("create" + create_params + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest()
+    password = b32encode(secrets.token_bytes(7))[:20].decode()
+    signer = Signer()
     url = add_query_to_redirect_url("/calls/bigbluebutton/join", urlencode({  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
-        "meeting_id": id,
-        "name": meeting_name,
-        "password": password,
-        "checksum": checksum
+        "meeting_id": signer.sign(id),
+        "name": signer.sign(meeting_name),
+        "password": signer.sign(password)
     }, quote_via=quote))
     return json_success({"url": url})
 
@@ -196,22 +187,30 @@ def get_bigbluebutton_url(request: HttpRequest, user_profile: UserProfile,
 @never_cache
 @has_request_variables
 def join_bigbluebutton(request: HttpRequest, meeting_id: str = REQ(),
-                       name: str = REQ(), password: str = REQ(),
-                       checksum: str = REQ()) -> HttpResponse:
+                       name: str = REQ(), password: str = REQ()) -> HttpResponse:
     if settings.BIG_BLUE_BUTTON_URL is None or settings.BIG_BLUE_BUTTON_SECRET is None:
         return json_error(_("Big Blue Button is not configured."))
     else:
+        signer = Signer()
+        meeting_id = signer.unsign(meeting_id)
+        name = signer.unsign(name)
+        password = signer.unsign(password)
+        create_params = urlencode({  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
+            "meetingID": meeting_id,
+            "name": name,
+            "moderatorPW": password,
+            "attendeePW": password[:10]
+        }, quote_via=quote)
+        checksum = hashlib.sha1(("create" + create_params + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest()
         try:
             response = requests.get(
-                add_query_to_redirect_url(
-                    settings.BIG_BLUE_BUTTON_URL + "api/create",
-                    urlencode({  # type: ignore[type-var] # https://github.com/python/typeshed/issues/4234
-                        "meetingID": meeting_id,
-                        "name": name,
-                        "moderatorPW": password,
-                        "attendeePW": hashlib.sha1((password + settings.BIG_BLUE_BUTTON_SECRET).encode()).hexdigest(),
-                        "checksum": checksum
-                    }, quote_via=quote)))
+                add_query_arg_to_redirect_url(
+                    add_query_to_redirect_url(
+                        settings.BIG_BLUE_BUTTON_URL + "api/create",
+                        create_params
+                    ),
+                    "checksum=" + checksum
+                ))
             response.raise_for_status()
         except requests.RequestException:
             return json_error(_("Error connecting to the Big Blue Button server."))
